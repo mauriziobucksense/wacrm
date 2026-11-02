@@ -335,6 +335,7 @@
     "conversationList": {
       "searchPlaceholder": "Search conversations...",
       "filterAll": "All",
+      "filterAllMine": "My conversations",
       "filterUnread": "Unread",
       "filterWaiting": "Waiting for reply",
       "filterUnassigned": "Unassigned",

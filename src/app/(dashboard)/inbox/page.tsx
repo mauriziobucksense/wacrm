@@ -23,6 +23,8 @@ import {
   mergeFetchedPage,
   prependOlderMessages,
 } from "@/lib/inbox/optimistic-messages";
+import { useAuth } from "@/hooks/use-auth";
+import { hasMinRole } from "@/lib/auth/roles";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -43,6 +45,12 @@ function InboxPageInner() {
   const t = useTranslations("Inbox.page");
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Scope realtime INSERT events the same way the fetch is scoped in
+  // ConversationList: agents/viewers only see their own + unassigned convs.
+  const { user, accountRole } = useAuth();
+  const isPrivileged = accountRole ? hasMinRole(accountRole, "admin") : false;
+
   /**
    * `?c=<id>` deep-link support. Used when landing here from the
    * dashboard's recent-conversations list so the right thread opens
@@ -284,6 +292,19 @@ function InboxPageInner() {
       const conv = event.new;
 
       if (event.eventType === "INSERT") {
+        // For scoped users (agent/viewer), ignore INSERT events for
+        // conversations that are assigned to another agent. These convs
+        // were excluded from the initial fetch and should not surface
+        // via realtime either.
+        if (
+          !isPrivileged &&
+          conv.assigned_agent_id !== null &&
+          conv.assigned_agent_id !== undefined &&
+          conv.assigned_agent_id !== user?.id
+        ) {
+          return;
+        }
+
         // Prepend immediately for snappy UX so the new conv shows in the
         // list right away, then hydrate to fill in the `contact` join
         // (realtime payloads never include joins). Skip both if we
@@ -333,7 +354,7 @@ function InboxPageInner() {
         }
       }
     },
-    [activeConversation, hydrateConversation]
+    [activeConversation, hydrateConversation, isPrivileged, user?.id]
   );
 
   // Subscribe to realtime. The `isConnected` flag below feeds the

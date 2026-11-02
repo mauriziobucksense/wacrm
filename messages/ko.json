@@ -335,6 +335,7 @@
     "conversationList": {
       "searchPlaceholder": "대화 검색...",
       "filterAll": "전체",
+      "filterAllMine": "내 대화",
       "filterUnread": "읽지 않음",
       "filterWaiting": "답장 대기",
       "filterUnassigned": "미배정",

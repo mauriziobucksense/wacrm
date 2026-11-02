@@ -8,6 +8,8 @@ import {
   normalizeConversations,
 } from "@/lib/inbox/conversations";
 import { applyInboxFilter, type InboxFilter } from "@/lib/inbox/inbox-filters";
+import { useAuth } from "@/hooks/use-auth";
+import { hasMinRole } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
 import { Search, ChevronDown, X } from "lucide-react";
@@ -54,9 +56,14 @@ export function ConversationList({
   initialFilter = "all",
 }: ConversationListProps) {
   const t = useTranslations("Inbox.conversationList");
-  
+
+  // Scope the fetch to "mine + unassigned" for agents/viewers.
+  // Owner and admin are privileged and receive all conversations.
+  const { user, accountRole, profileLoading } = useAuth();
+  const isPrivileged = accountRole ? hasMinRole(accountRole, "admin") : false;
+
   const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = useMemo(() => [
-    { label: t("filterAll"), value: "all" },
+    { label: isPrivileged ? t("filterAll") : t("filterAllMine"), value: "all" },
     { label: t("filterUnread"), value: "unread" },
     { label: t("filterWaiting"), value: "waiting" },
     { label: t("filterUnassigned"), value: "unassigned" },
@@ -64,7 +71,7 @@ export function ConversationList({
     { label: t("filterOpen"), value: "open" },
     { label: t("filterPending"), value: "pending" },
     { label: t("filterClosed"), value: "closed" },
-  ], [t]);
+  ], [t, isPrivileged]);
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>(initialFilter);
@@ -104,10 +111,23 @@ export function ConversationList({
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase
+      // Wait for the profile to resolve before fetching. Without this guard,
+      // accountRole is still null on the first render and isPrivileged would
+      // be false — an owner/admin would momentarily receive the scoped fetch.
+      if (profileLoading) return;
+
+      const query = supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
         .order("last_message_at", { ascending: false });
+
+      // Scope the fetch for non-privileged users (agent / viewer):
+      // only unassigned conversations OR those assigned to the current user.
+      if (!isPrivileged && user?.id) {
+        query.or(`assigned_agent_id.is.null,assigned_agent_id.eq.${user.id}`);
+      }
+
+      const { data, error } = await query;
 
       if (cancelled) return;
 
@@ -130,10 +150,12 @@ export function ConversationList({
     return () => {
       cancelled = true;
     };
-    // `resyncToken` is included so the parent can force a refetch when
-    // the realtime channel reconnects or the tab regains focus — catches
-    // up on any events sent while the WS was disconnected or throttled.
-  }, [resyncToken]);
+    // `resyncToken` triggers a refetch on realtime reconnect / tab focus.
+    // `isPrivileged` and `user?.id` ensure the correct scope is applied if
+    // the session changes (e.g. role updated while logged in).
+    // `profileLoading` re-runs the effect once the profile resolves so the
+    // early-return guard above lifts and the scoped fetch fires.
+  }, [resyncToken, isPrivileged, user?.id, profileLoading]);
 
   // Tag definitions for the filter picker — loaded once so labels/colours
   // stay stable regardless of which conversations happen to be loaded.
